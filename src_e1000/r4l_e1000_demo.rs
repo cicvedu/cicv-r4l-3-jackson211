@@ -316,11 +316,7 @@ struct E1000DrvPrvData {
 impl driver::DeviceRemoval for E1000DrvPrvData {
     fn device_remove(&self) {
         pr_info!("Rust for linux e1000 driver demo (device_remove)\n");
-
-        // Example of unregistering the network device
-        if let Err(e) = self._netdev_reg.unregister() {
-            pr_err!("Failed to unregister network device: {}", e);
-        }
+        drop(&self._netdev_reg);
     }
 }
 
@@ -479,7 +475,23 @@ impl pci::Driver for E1000Drv {
 
     fn remove(data: &Self::Data) {
         pr_info!("Rust for linux e1000 driver demo (remove)\n");
-        prv_data.device_remove();
+        let netdev_reg = &data._netdev_reg;
+        let net_dev = (*netdev_reg).dev_get();
+        let bars = data.bars;
+        let pci_dev_ptr = data.pci_dev_ptr;
+
+        unsafe {
+            bindings::pci_release_selected_regions(pci_dev_ptr, bars);
+            bindings::pci_clear_master(pci_dev_ptr);
+            bindings::pci_disable_device(pci_dev_ptr);
+        }
+
+        net_dev.netif_carrier_off();
+        net_dev.netif_stop_queue();
+
+        drop(net_dev);
+        drop(netdev_reg);
+        drop(data);
     }
 }
 struct E1000KernelMod {
